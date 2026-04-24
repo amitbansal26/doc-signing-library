@@ -30,6 +30,14 @@ vault:
 app:
   vault:
     pki-role: doc-signer
+  object-storage:
+    endpoint: ${OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
+    region: ${OBJECT_STORAGE_REGION:us-east-1}
+    access-key-id: ${OBJECT_STORAGE_ACCESS_KEY:minioadmin}
+    secret-access-key: ${OBJECT_STORAGE_SECRET_KEY:minioadmin}
+    path-style-access: ${OBJECT_STORAGE_PATH_STYLE:true}
+    default-bucket: ${OBJECT_STORAGE_DEFAULT_BUCKET:documents}
+    signed-object-key-prefix: ${OBJECT_STORAGE_SIGNED_PREFIX:signed/}
 
 server:
   port: 8080
