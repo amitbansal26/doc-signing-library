@@ -1,11 +1,15 @@
 package com.docsigning.controller;
 
+import com.docsigning.dto.ObjectStorageSigningRequest;
+import com.docsigning.dto.ObjectStorageSigningResponse;
 import com.docsigning.model.SigningAuditRecord;
 import com.docsigning.service.AuditService;
+import com.docsigning.service.ObjectStorageService;
 import com.docsigning.service.PdfSigningService;
 import com.docsigning.service.PdfSigningService.SignPdfResult;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -16,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
@@ -29,6 +34,7 @@ public class SigningController {
 
     private final PdfSigningService pdfSigningService;
     private final AuditService auditService;
+    private final ObjectStorageService objectStorageService;
 
     @Operation(summary = "Sign a PDF document",
                description = "Uploads a PDF, signs it using a per-document Vault Transit RSA-3072 key, and returns the signed PDF.")
@@ -69,6 +75,66 @@ public class SigningController {
                 .header("X-Document-Id", documentId)
                 .header("X-Audit-Record-Id", saved.getId().toString())
                 .body(result.signedPdf());
+    }
+
+    @Operation(summary = "Sign a PDF stored in object storage",
+               description = "Fetches a PDF from S3-compatible object storage, signs it using a per-document "
+                       + "Vault Transit RSA-3072 key, uploads the signed PDF back to object storage, and "
+                       + "returns the location of the signed document.")
+    @PostMapping(value = "/sign/object-storage",
+                 consumes = MediaType.APPLICATION_JSON_VALUE,
+                 produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ObjectStorageSigningResponse> signPdfFromObjectStorage(
+            @Valid @RequestBody ObjectStorageSigningRequest request) throws Exception {
+
+        String documentId = UUID.randomUUID().toString();
+        log.info("Received object-storage signing request: documentId={}, bucket={}, key={}, signerName={}",
+                documentId, request.bucket(), request.objectKey(), request.signerName());
+
+        // Download the source PDF from object storage
+        byte[] pdfBytes = objectStorageService.downloadPdf(request.bucket(), request.objectKey());
+
+        // Compute input document SHA-256
+        byte[] docHashBytes = MessageDigest.getInstance("SHA-256").digest(pdfBytes);
+        String docSha256 = HexFormat.of().formatHex(docHashBytes);
+
+        String reason = request.reason() != null ? request.reason() : "Document Signing";
+        String location = request.location() != null ? request.location() : "";
+
+        // Perform signing
+        SignPdfResult result = pdfSigningService.signPdf(pdfBytes, documentId, request.signerName(), reason, location);
+
+        // Compute signed PDF SHA-256
+        byte[] signedHashBytes = MessageDigest.getInstance("SHA-256").digest(result.signedPdf());
+        String signedSha256 = HexFormat.of().formatHex(signedHashBytes);
+
+        // Resolve output bucket and key
+        String outputBucket = (request.outputBucket() != null && !request.outputBucket().isBlank())
+                ? request.outputBucket() : request.bucket();
+        String outputObjectKey = objectStorageService.resolveOutputObjectKey(
+                request.objectKey(), request.outputObjectKey());
+
+        // Upload the signed PDF back to object storage
+        objectStorageService.uploadPdf(outputBucket, outputObjectKey, result.signedPdf());
+
+        // Build and persist audit record
+        SigningAuditRecord auditRecord = buildAuditRecord(
+                documentId, docSha256, signedSha256, result, request.signerName(), reason, location);
+        SigningAuditRecord saved = auditService.saveAuditRecord(auditRecord);
+
+        log.info("Object-storage signing complete: documentId={}, outputBucket={}, outputKey={}, auditRecordId={}",
+                documentId, outputBucket, outputObjectKey, saved.getId());
+
+        String signedAt = DateTimeFormatter.ISO_LOCAL_DATE_TIME.format(
+                saved.getSignedAt() != null ? saved.getSignedAt() : LocalDateTime.now());
+
+        return ResponseEntity.ok(new ObjectStorageSigningResponse(
+                documentId,
+                outputBucket,
+                outputObjectKey,
+                signedAt,
+                result.signerCert().getSerialNumber().toString(16),
+                saved.getId().toString()));
     }
 
     @Operation(summary = "List all audit records")
