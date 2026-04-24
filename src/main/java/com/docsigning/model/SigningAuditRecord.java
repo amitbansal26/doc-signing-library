@@ -8,7 +8,6 @@ import org.hibernate.annotations.UuidGenerator;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
-
 @Entity
 @Table(name = "signing_audit_records")
 @Getter
@@ -60,4 +59,14 @@ public class SigningAuditRecord {
 
     @Column(name = "location", length = 500)
     private String location;
+
+    @Column(name = "created_at", updatable = false)
+    private LocalDateTime createdAt;
+
+    @PrePersist
+    protected void onCreate() {
+        if (createdAt == null) {
+            createdAt = LocalDateTime.now();
+        }
+    }
 }
