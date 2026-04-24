@@ -11,6 +11,9 @@ import java.io.OutputStream;
 
 /**
  * BouncyCastle ContentSigner backed by Vault Transit — the private key never leaves the HSM.
+ *
+ * <p><strong>Not thread-safe.</strong> Each instance should be used for a single signing operation
+ * and then discarded; do not share or reuse instances across concurrent calls.</p>
  */
 public class VaultTransitContentSigner implements ContentSigner {
 

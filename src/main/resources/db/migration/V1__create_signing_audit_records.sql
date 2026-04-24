@@ -13,7 +13,7 @@ CREATE TABLE signing_audit_records (
     signed_by VARCHAR(255),
     reason VARCHAR(500),
     location VARCHAR(500),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL
 );
 
 CREATE INDEX idx_signing_audit_document_id ON signing_audit_records(document_id);
